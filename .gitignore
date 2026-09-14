@@ -1,0 +1,12 @@
+# Datos crudos (no se suben, se descargan de la fuente oficial)
+*.dta
+
+# Scripts de diagnóstico/depuración, no relevantes para el repo final
+diagnos.py
+
+# Archivos de sistema y entornos
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+venv/
