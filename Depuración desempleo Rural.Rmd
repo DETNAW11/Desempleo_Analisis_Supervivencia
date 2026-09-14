@@ -1,0 +1,289 @@
+---
+title: "Modelo de Duración de Desempleo"
+author: "Consultoria"
+date: "2025-08-22"
+output: word_document
+---
+
+# Carga de los paquetes
+
+```{r}
+#install.packages("survival")
+#install.packages("KMsurv")
+#install.packages("survMisc")
+#install.packages("survminer")
+#install.packages("survival")
+#install.packages("ggfortify")
+#install.packages("flexsurv")
+#install.packages("actuar")
+#install.packages("dplyr")
+#install.packages("eha")
+#install.packages("kableExtra")
+```
+
+# Llamar los paquetes
+
+```{r}
+library(survival)
+library(KMsurv)
+library(survMisc)
+library(survminer)
+library(survival)
+library(ggfortify)
+library(flexsurv)
+library(actuar)
+library(dplyr)
+library(eha)
+library(kableExtra)
+```
+
+# Cargar la base de datos
+
+```{r}
+library(haven)
+TOTAL_NACIONAL_ANUAL_2021 <- read_dta("C:/Users/luisa/OneDrive/Escritorio/universidad/consultoria estadistica/TOTAL_NACIONAL_ANUAL_2021.dta")
+#TOTAL_NACIONAL = ...
+```
+
+# Limpieza de la base de datos
+
+```{r}
+base = TOTAL_NACIONAL_ANUAL_2021
+```
+
+```{r}
+#se filtra por la población rural
+base = filter(base, clase == 2)
+#se selecciona las variables para el modelo, la primera debe ser la variable tiempo
+Tiempo_Busqueda = base$p7250 # Tiempo busqueda en semanas
+Sexo = base$p6020
+Edad = base$p6040
+Nivel_Educativo = base$p6220 
+Jefe_Hogar = base$p6050
+Estado_Civil = base$p6070
+Estrato = base$p4030s1a1
+Canal_Busqueda = base$p6290
+Ingreso_No_Laboral = base$p7510s7
+
+# Crear la variable ocupados
+
+ocupados = base$ocupado
+ocupados[is.na(ocupados)] = 0
+nocupados = base$desocupado
+nocupados = ifelse(nocupados == 1,2,0)
+nocupados[is.na(nocupados)] = 0
+ocupados = ifelse(ocupados == 1,2,0)
+Ocupados = ocupados + nocupados # forma de crear la variable Ocupados
+
+#Crear una base con las variables seleccionadas
+base1 = data.frame(Tiempo_Busqueda, Sexo, Edad, Nivel_Educativo, Jefe_Hogar, Estado_Civil, Estrato, Canal_Busqueda, Ingreso_No_Laboral, Ocupados)
+
+#Eliminar valores (Nosabe/Noresponde), categorizar las variables, convertir las variables a factores y usamos el na.omit
+
+basef = base1
+
+basef = basef[basef$Ocupados != 0,] #Elimina los 0
+basef$Ocupados = ifelse(basef$Ocupados == 2,1,0)
+
+basef = filter(basef, Estrato != 9) # 9: No Sabe / No Responde
+basef = filter(basef, Nivel_Educativo != 9) # 9: No Sabe / No Responde
+basef = filter(basef, Ingreso_No_Laboral != 9) # 9: No Sabe / No Responde
+
+basef$Jefe_Hogar = ifelse(basef$Jefe_Hogar == 1,1,0) # 1: son los que si son jefes de hogar y 0: todos los demas para las demas categorias
+basef$Jefe_Hogar = as.factor(basef$Jefe_Hogar)
+
+basef$Sexo = ifelse(basef$Sexo == 2,0,1) # 0: para las mujeres y 1: para los hombres
+basef$Sexo = as.factor(basef$Sexo)
+
+basef$Nivel_Educativo = as.factor(basef$Nivel_Educativo)
+# 1: Ningun nivel educativo, 2: Bachiller, 3: Técnico, 4: Universitario, 5: Postgrado
+
+basef$Canal_Busqueda = ifelse(basef$Canal_Busqueda == 1,1,
+                       ifelse(basef$Canal_Busqueda == 2,2,
+                       ifelse(basef$Canal_Busqueda == 3,3,
+                       ifelse(basef$Canal_Busqueda == 4,3,
+                       ifelse(basef$Canal_Busqueda == 5,3, NA)))))
+
+# 1: informal, 2: informal moderado, 3: Formal
+basef$Canal_Busqueda = as.factor(basef$Canal_Busqueda)
+
+basef$Estado_Civil = as.factor(basef$Estado_Civil)
+# 1: No casado y pareja < a 2 años, 2: No casado y pareja > a 2 años, 3: Casad@s, 4: Separad@s, 5: Viud@s, 6: Solter@s
+
+basef$Estrato = ifelse(basef$Estrato == 1,1,
+                ifelse(basef$Estrato == 2,1,
+                ifelse(basef$Estrato == 3,2,
+                ifelse(basef$Estrato == 4,2,
+                ifelse(basef$Estrato == 5,3,3)))))
+basef$Estrato = as.factor(basef$Estrato)
+#1: Estratos 1 y 2, 2: Estratos 3 y 4, 3: Estratos 5 y 6
+
+basef$Edad = ifelse(basef$Edad <= 28,1,
+             ifelse(basef$Edad <= 40,2,
+             ifelse(basef$Edad <= 60,3, 4)))
+basef$Edad = as.factor(basef$Edad)
+#1: Menores a 28, 2: 29-40, 3: 41-60, 4: Mayores a 60
+
+basef = na.omit(basef)
+#Se vuelve a correr el na.omit porque dado que en el canal de busqueda se asigna Na a los valores fuera de los grupos del 1-5
+
+```
+
+# modelo de Cox
+
+```{r}
+modelo = coxph(Surv(Tiempo_Busqueda, Ocupados) ~ Sexo + Edad + Nivel_Educativo + Estrato + Estado_Civil + Canal_Busqueda +  Jefe_Hogar + Ingreso_No_Laboral, data = basef)
+
+summary(modelo)
+```
+
+Ahora se realizara el procedimiento con cada una de las variables.
+
+```{r}
+modelo_sexo = coxph(Surv(Tiempo_Busqueda, Ocupados) ~ Sexo, data = basef)
+
+summary(modelo_sexo)
+```
+
+
+```{r}
+modelo_edad = coxph(Surv(Tiempo_Busqueda, Ocupados) ~ Edad, data = basef)
+
+summary(modelo_edad)
+# A este se le hace grafica para ver como se esta comportando
+```
+
+
+```{r}
+modelo_nivel_educativo = coxph(Surv(Tiempo_Busqueda, Ocupados) ~ Nivel_Educativo, data = basef)
+
+summary(modelo_nivel_educativo)
+```
+
+```{r}
+modelo_estrato = coxph(Surv(Tiempo_Busqueda, Ocupados) ~ Estrato, data = basef)
+
+summary(modelo_estrato)
+```
+
+```{r}
+modelo_estado_civil = coxph(Surv(Tiempo_Busqueda, Ocupados) ~ Estado_Civil, data = basef)
+
+summary(modelo_estado_civil)
+```
+
+```{r}
+modelo_canal_de_busqueda = coxph(Surv(Tiempo_Busqueda, Ocupados) ~ Canal_Busqueda, data = basef)
+
+summary(modelo_canal_de_busqueda)
+```
+
+```{r}
+modelo_jefe_hogar = coxph(Surv(Tiempo_Busqueda, Ocupados) ~ Jefe_Hogar, data = basef)
+
+summary(modelo_jefe_hogar)
+```
+
+```{r}
+modelo_ingreso_no_laboral = coxph(Surv(Tiempo_Busqueda, Ocupados) ~ Ingreso_No_Laboral, data = basef)
+
+summary(modelo_ingreso_no_laboral)
+```
+
+```{r}
+tapply(basef$Tiempo_Busqueda,basef$Sexo, mean)
+#Tiempo de busqueda en semanas
+```
+```{r}
+tapply(basef$Tiempo_Busqueda,basef$Edad, mean)
+```
+```{r}
+tapply(basef$Tiempo_Busqueda,basef$Nivel_Educativo, mean)
+```
+```{r}
+tapply(basef$Tiempo_Busqueda,basef$Estrato, mean)
+```
+```{r}
+tapply(basef$Tiempo_Busqueda,basef$Estado_Civil, mean)
+```
+```{r}
+tapply(basef$Tiempo_Busqueda,basef$Canal_Busqueda, mean)
+```
+```{r}
+tapply(basef$Tiempo_Busqueda,basef$Jefe_Hogar, mean)
+```
+```{r}
+tapply(basef$Tiempo_Busqueda,basef$Ingreso_No_Laboral, mean)
+```
+# estimador de Kaplan-Meier
+
+Nota: esto se realiza para las variables significativas en el modelo
+```{r}
+surv_objet1 = Surv(time = basef$Tiempo_Busqueda, event = basef$Ocupados)
+fit1 = survfit(surv_objet1 ~ Sexo, data = basef) 
+#summary(fit1)
+ggsurvplot(fit1, xlab = "Semanas", ylab = "Probabildad", break.x.by = 12, xlim = c(0,72), legend.labs = c("Mujer", "Hombre"))
+
+#table(basef$Sexo)
+```
+
+```{r}
+surv_objet1 = Surv(time = basef$Tiempo_Busqueda, event = basef$Ocupados)
+fit2 = survfit(surv_objet1 ~ Estado_Civil, data = basef) 
+#summary(fit2)
+ggsurvplot(fit2, xlab = "Semanas", ylab = "Probabildad", break.x.by = 12, xlim = c(0,72), legend.labs = c("No casado y pareja menor a 2 años", "No casado y pareja mayor a 2 años", "Casad@s", "Separad@s", "Viud@s", "Solter@s"))
+
+#table(basef$Estado_Civil)
+```
+```{r}
+surv_objet1 = Surv(time = basef$Tiempo_Busqueda, event = basef$Ocupados)
+fit3 = survfit(surv_objet1 ~ Estrato, data = basef) 
+#summary(fit3)
+ggsurvplot(fit3, xlab = "Semanas", ylab = "Probabildad", break.x.by = 12, xlim = c(0,72), legend.labs = c("Estratos 1 y 2", "Estratos 3 y 4", "Estratos 5 y 6"))
+
+#table(basef$Estrato)
+```
+```{r}
+surv_objet1 = Surv(time = basef$Tiempo_Busqueda, event = basef$Ocupados)
+fit3 = survfit(surv_objet1 ~ Edad, data = basef) 
+#summary(fit3)
+ggsurvplot(fit3, xlab = "Semanas", ylab = "Probabildad", break.x.by = 12, xlim = c(0,72), legend.labs = c("Menores a 28", "29-40", "41-60", "Mayores a 60"))
+
+#table(basef$Edad)
+```
+```{r}
+surv_objet1 = Surv(time = basef$Tiempo_Busqueda, event = basef$Ocupados)
+fit4 = survfit(surv_objet1 ~ Canal_Busqueda, data = basef) 
+#summary(fit4)
+ggsurvplot(fit4, xlab = "Semanas", ylab = "Probabildad", break.x.by = 12, xlim = c(0,72), legend.labs = c("informal", "informal moderado", "Formal"))
+
+#table(basef$Canal_Busqueda)
+```
+
+```{r}
+surv_objet1 = Surv(time = basef$Tiempo_Busqueda, event = basef$Ocupados)
+fit5 = survfit(surv_objet1 ~ Nivel_Educativo, data = basef) 
+#summary(fit5)
+ggsurvplot(fit5, xlab = "Semanas", ylab = "Probabildad", break.x.by = 12, xlim = c(0,72), legend.labs = c("Ningun nivel educativo", "Bachiller", "Técnico", "Universitario", "Postgrado"))
+
+#table(basef$Nivel_educativo)
+```
+```{r}
+surv_objet1 = Surv(time = basef$Tiempo_Busqueda, event = basef$Ocupados)
+fit6 = survfit(surv_objet1 ~ Jefe_Hogar, data = basef) 
+#summary(fit6)
+ggsurvplot(fit6, xlab = "Semanas", ylab = "Probabildad", break.x.by = 12, xlim = c(0,72), legend.labs = c("son los que si son jefes de hogar", "todos los demas para las demas categorias"))
+
+#table(basef$Jefe_Hogar)
+```
+```{r}
+surv_objet1 = Surv(time = basef$Tiempo_Busqueda, event = basef$Ocupados)
+fit7 = survfit(surv_objet1 ~ Ingreso_No_Laboral, data = basef) 
+#summary(fit7)
+ggsurvplot(fit7, xlab = "Semanas", ylab = "Probabildad", break.x.by = 12, xlim = c(0,72), legend.labs = c("Sí", "No"))
+
+#table(basef$Ingreso_No_Laboral)
+```
+
+
+
